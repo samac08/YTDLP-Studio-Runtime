@@ -1,0 +1,120 @@
+name: Build Runtime Components
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Runtime release version (for example 2026.09.26)
+        required: true
+        default: 2026.09.26
+  push:
+    tags:
+      - 'runtime-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            package: zip
+          - name: Windows ARM64
+            os: windows-11-arm
+            package: zip
+          - name: macOS Intel
+            os: macos-15-intel
+            package: tar
+          - name: macOS Apple Silicon
+            os: macos-14
+            package: tar
+          - name: Linux x64
+            os: ubuntu-latest
+            package: tar
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            package: tar
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Windows runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
+          winget install --id aria2.aria2 -e --accept-package-agreements --accept-source-agreements
+          winget install --id yt-dlp.yt-dlp -e --accept-package-agreements --accept-source-agreements
+          New-Item -ItemType Directory -Force staging/bin | Out-Null
+          foreach ($tool in @('ffmpeg.exe','ffprobe.exe','aria2c.exe','yt-dlp.exe')) {
+            $command = Get-Command $tool -ErrorAction Stop
+            Copy-Item -LiteralPath $command.Source -Destination (Join-Path staging/bin $tool)
+          }
+      - name: Prepare macOS runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew update
+          brew install ffmpeg aria2 yt-dlp mpv
+          mkdir -p staging/bin staging/lib
+          cp "$(command -v ffmpeg)" staging/bin/
+          cp "$(command -v ffprobe)" staging/bin/
+          cp "$(command -v aria2c)" staging/bin/
+          cp "$(command -v yt-dlp)" staging/bin/
+          MPV_PREFIX="$(brew --prefix mpv)"
+          find "$MPV_PREFIX" -name 'libmpv*.dylib' -maxdepth 3 -type f -exec cp {} staging/lib/ \; || true
+      - name: Prepare Linux runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg aria2 zip
+          python -m pip install --user --upgrade yt-dlp
+          mkdir -p staging/bin
+          cp "$(command -v ffmpeg)" staging/bin/
+          cp "$(command -v ffprobe)" staging/bin/
+          cp "$(command -v aria2c)" staging/bin/
+          cp "$(command -v yt-dlp)" staging/bin/
+      - name: Write runtime manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, platform
+          from pathlib import Path
+          bin_dir = Path('staging/bin')
+          tools = sorted(p.name for p in bin_dir.iterdir() if p.is_file())
+          Path('staging/runtime-manifest.json').write_text(json.dumps({
+              'schema': 1, 'platform': platform.system(), 'arch': platform.machine(),
+              'tools': tools, 'libmpv_optional': True
+          }, indent=2), encoding='utf-8')
+          PY
+      - name: Archive runtime
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          VERSION="${VERSION#runtime-v}"
+          SAFE_ARCH="${{ runner.arch }}"
+          if [ "${{ matrix.package }}" = zip ]; then
+            7z a "runtime-v${VERSION}-${{ runner.os }}-${SAFE_ARCH}.zip" ./staging/*
+          else
+            tar -czf "runtime-v${VERSION}-${{ runner.os }}-${SAFE_ARCH}.tar.gz" -C staging .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Runtime-${{ matrix.name }}
+          path: runtime-v*
+      - name: Publish public runtime release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          VERSION="${VERSION#runtime-v}"
+          TAG="runtime-v${VERSION}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "YTDLP Studio Runtime ${VERSION}" --generate-notes
+          gh release upload "$TAG" runtime-v* --clobber
