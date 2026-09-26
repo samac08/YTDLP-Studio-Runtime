@@ -116,5 +116,7 @@ jobs:
         run: |
           VERSION="${VERSION#runtime-v}"
           TAG="runtime-v${VERSION}"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "YTDLP Studio Runtime ${VERSION}" --generate-notes
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "YTDLP Studio Runtime ${VERSION}" --generate-notes || gh release view "$TAG" >/dev/null
+          fi
           gh release upload "$TAG" runtime-v* --clobber
