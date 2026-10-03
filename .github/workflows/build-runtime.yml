@@ -64,7 +64,8 @@ jobs:
           foreach ($tool in @('ffmpeg.exe','ffprobe.exe','aria2c.exe','yt-dlp.exe')) {
             $path = Join-Path staging/bin $tool
             if (-not (Test-Path -LiteralPath $path)) { throw "Required runtime tool is missing: $tool" }
-            & $path --version | Select-Object -First 1
+            $versionArg = if ($tool -in @('ffmpeg.exe','ffprobe.exe')) { '-version' } else { '--version' }
+            & $path $versionArg | Select-Object -First 1
             if ($LASTEXITCODE -ne 0) { throw "Runtime validation failed: $tool" }
           }
       - name: Prepare macOS runtime
