@@ -72,8 +72,9 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew update
-          brew install ffmpeg aria2 yt-dlp mpv
+          # Hosted runners already ship current Homebrew metadata.  Updating it
+          # here adds several idle minutes and can stall the whole Release.
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg aria2 yt-dlp mpv
           mkdir -p staging/bin staging/lib
           cp "$(command -v ffmpeg)" staging/bin/
           cp "$(command -v ffprobe)" staging/bin/
