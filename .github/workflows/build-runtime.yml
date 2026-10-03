@@ -6,13 +6,19 @@ on:
       version:
         description: Runtime release version (for example 2026.09.26)
         required: true
-        default: 2026.09.26
+        default: 2026.10.03
   push:
     tags:
       - 'runtime-v*'
 
 permissions:
   contents: write
+
+# One release is published only after every selected platform archive exists.
+# This prevents matrix jobs racing to create/upload the same Release asset.
+concurrency:
+  group: runtime-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -74,6 +80,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg aria2 zip
           python -m pip install --user --upgrade yt-dlp
+          export PATH="$HOME/.local/bin:$PATH"
           mkdir -p staging/bin
           cp "$(command -v ffmpeg)" staging/bin/
           cp "$(command -v ffprobe)" staging/bin/
@@ -108,15 +115,33 @@ jobs:
         with:
           name: Runtime-${{ matrix.name }}
           path: runtime-v*
+
+  publish:
+    name: Publish Runtime Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: Runtime-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify complete Runtime asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release-assets -maxdepth 1 -type f -print
+          test "$(find release-assets -maxdepth 1 -type f -name 'runtime-v*' | wc -l)" -eq 6
       - name: Publish public runtime release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version || github.ref_name }}
         run: |
+          set -euo pipefail
           VERSION="${VERSION#runtime-v}"
           TAG="runtime-v${VERSION}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "YTDLP Studio Runtime ${VERSION}" --generate-notes || gh release view "$TAG" >/dev/null
+            gh release create "$TAG" --title "YTDLP Studio Runtime ${VERSION}" --generate-notes
           fi
-          gh release upload "$TAG" runtime-v* --clobber
+          gh release upload "$TAG" release-assets/runtime-v* --clobber
