@@ -86,7 +86,12 @@ jobs:
           $mpvArchive = Join-Path $PWD $mpvAsset.name
           $mpvStage = Join-Path $PWD 'mpv-runtime'
           Invoke-WebRequest -Uri $mpvAsset.browser_download_url -OutFile $mpvArchive
-          & 7z x $mpvArchive "-o$mpvStage" -y | Out-Host
+          $sevenZip = @(
+            (Join-Path ${env:ProgramFiles} '7-Zip\7z.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe')
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $sevenZip) { throw 'The GitHub Windows runner has no 7-Zip executable' }
+          & $sevenZip x $mpvArchive "-o$mpvStage" -y | Out-Host
           if ($LASTEXITCODE -ne 0) { throw 'Unable to extract the mpv Windows development archive' }
           $mpvDlls = Get-ChildItem -LiteralPath $mpvStage -Recurse -File -Filter '*.dll'
           $mpvLibrary = $mpvDlls | Where-Object { $_.Name -in @('libmpv-2.dll','mpv-2.dll','libmpv.dll') } | Select-Object -First 1
