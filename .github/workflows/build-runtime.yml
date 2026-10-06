@@ -51,22 +51,44 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
-          winget install --id aria2.aria2 -e --accept-package-agreements --accept-source-agreements
-          winget install --id yt-dlp.yt-dlp -e --accept-package-agreements --accept-source-agreements
           New-Item -ItemType Directory -Force staging/bin | Out-Null
-          foreach ($tool in @('ffmpeg.exe','ffprobe.exe','aria2c.exe','yt-dlp.exe')) {
+          # Do not package a Windows App Execution Alias.  Winget may add an
+          # aria2c command alias that works on the runner but is not the real
+          # executable and fails as soon as the Runtime archive is installed.
+          foreach ($tool in @('ffmpeg.exe','ffprobe.exe')) {
             $command = Get-Command $tool -ErrorAction Stop
+            if ($command.CommandType -ne 'Application') { throw "Expected an application for $tool, got $($command.CommandType)" }
             $source = (Resolve-Path -LiteralPath $command.Source).Path
             Copy-Item -LiteralPath $source -Destination (Join-Path staging/bin $tool)
           }
-          $ariaSource = (Resolve-Path -LiteralPath (Get-Command aria2c.exe -ErrorAction Stop).Source).Path
-          Get-ChildItem -LiteralPath (Split-Path -Parent $ariaSource) -File -Filter *.dll | Copy-Item -Destination staging/bin
+
+          $ariaArchive = Join-Path $PWD 'aria2-runtime.zip'
+          $ariaStage = Join-Path $PWD 'aria2-runtime'
+          Invoke-WebRequest -Uri 'https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip' -OutFile $ariaArchive
+          Expand-Archive -LiteralPath $ariaArchive -DestinationPath $ariaStage -Force
+          $ariaExecutable = Get-ChildItem -LiteralPath $ariaStage -Recurse -File -Filter 'aria2c.exe' | Select-Object -First 1
+          if (-not $ariaExecutable) { throw 'Official aria2 archive does not contain aria2c.exe' }
+          Copy-Item -LiteralPath $ariaExecutable.FullName -Destination 'staging/bin/aria2c.exe'
+          Get-ChildItem -LiteralPath $ariaExecutable.Directory.FullName -File -Filter '*.dll' | Copy-Item -Destination 'staging/bin'
+
+          # yt-dlp is intentionally a standalone official executable, not an
+          # installed application alias.  The Studio may update this file later.
+          Invoke-WebRequest -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile 'staging/bin/yt-dlp.exe'
+
+          # Validate with only the staging directory and System32 available.
+          # This catches missing adjacent DLLs that an Actions runner might hide.
+          $savedPath = $env:PATH
+          $env:PATH = "$(Resolve-Path $env:SystemRoot\System32);$(Resolve-Path 'staging/bin')"
+          try {
           foreach ($tool in @('ffmpeg.exe','ffprobe.exe','aria2c.exe','yt-dlp.exe')) {
             $path = Join-Path staging/bin $tool
             if (-not (Test-Path -LiteralPath $path)) { throw "Required runtime tool is missing: $tool" }
             $versionArg = if ($tool -in @('ffmpeg.exe','ffprobe.exe')) { '-version' } else { '--version' }
             & $path $versionArg | Select-Object -First 1
             if ($LASTEXITCODE -ne 0) { throw "Runtime validation failed: $tool" }
+          }
+          } finally {
+            $env:PATH = $savedPath
           }
       - name: Prepare macOS runtime
         if: runner.os == 'macOS'
