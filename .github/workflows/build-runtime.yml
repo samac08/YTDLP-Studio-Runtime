@@ -100,6 +100,7 @@ jobs:
 
           # Validate with only the staging directory and System32 available.
           # This catches missing adjacent DLLs that an Actions runner might hide.
+          $pythonExecutable = (Get-Command python -ErrorAction Stop).Source
           $savedPath = $env:PATH
           $env:PATH = "$(Resolve-Path $env:SystemRoot\System32);$(Resolve-Path 'staging/bin')"
           try {
@@ -114,7 +115,7 @@ jobs:
           if (-not $mpvLibrary) { throw 'Runtime validation failed: libmpv DLL is missing' }
           $env:MPV_RUNTIME_DIRECTORY = (Resolve-Path 'staging/bin').Path
           $env:MPV_RUNTIME_LIBRARY = $mpvLibrary.FullName
-          python -c 'import ctypes, os; os.add_dll_directory(os.environ["MPV_RUNTIME_DIRECTORY"]); ctypes.WinDLL(os.environ["MPV_RUNTIME_LIBRARY"]); print("libmpv load OK")'
+          & $pythonExecutable -c 'import ctypes, os; os.add_dll_directory(os.environ["MPV_RUNTIME_DIRECTORY"]); ctypes.WinDLL(os.environ["MPV_RUNTIME_LIBRARY"]); print("libmpv load OK")'
           if ($LASTEXITCODE -ne 0) { throw 'Runtime validation failed: libmpv cannot load with its packaged dependencies' }
           } finally {
             $env:PATH = $savedPath
