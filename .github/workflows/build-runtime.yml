@@ -75,6 +75,24 @@ jobs:
           # installed application alias.  The Studio may update this file later.
           Invoke-WebRequest -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile 'staging/bin/yt-dlp.exe'
 
+          # libmpv is shipped with the tool Runtime on Windows so the player
+          # does not depend on a separately installed browser or media suite.
+          # The development archive contains the loadable libmpv DLL together
+          # with its matching dependency DLLs; copying only libmpv itself would
+          # pass a file-exists check but fail when the player opens.
+          $mpvRelease = Invoke-RestMethod -Headers @{ 'User-Agent' = 'YTDLP-Studio-Runtime' } -Uri 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
+          $mpvAsset = $mpvRelease.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-.*\.7z$' } | Select-Object -First 1
+          if (-not $mpvAsset) { throw 'Latest mpv Windows release has no x64 development archive' }
+          $mpvArchive = Join-Path $PWD $mpvAsset.name
+          $mpvStage = Join-Path $PWD 'mpv-runtime'
+          Invoke-WebRequest -Uri $mpvAsset.browser_download_url -OutFile $mpvArchive
+          & 7z x $mpvArchive "-o$mpvStage" -y | Out-Host
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to extract the mpv Windows development archive' }
+          $mpvDlls = Get-ChildItem -LiteralPath $mpvStage -Recurse -File -Filter '*.dll'
+          $mpvLibrary = $mpvDlls | Where-Object { $_.Name -in @('libmpv-2.dll','mpv-2.dll','libmpv.dll') } | Select-Object -First 1
+          if (-not $mpvLibrary) { throw 'mpv Windows development archive does not contain a supported libmpv DLL' }
+          $mpvDlls | Copy-Item -Destination 'staging/bin'
+
           # Validate with only the staging directory and System32 available.
           # This catches missing adjacent DLLs that an Actions runner might hide.
           $savedPath = $env:PATH
@@ -87,6 +105,12 @@ jobs:
             & $path $versionArg | Select-Object -First 1
             if ($LASTEXITCODE -ne 0) { throw "Runtime validation failed: $tool" }
           }
+          $mpvLibrary = Get-ChildItem -LiteralPath 'staging/bin' -File | Where-Object { $_.Name -in @('libmpv-2.dll','mpv-2.dll','libmpv.dll') } | Select-Object -First 1
+          if (-not $mpvLibrary) { throw 'Runtime validation failed: libmpv DLL is missing' }
+          $env:MPV_RUNTIME_DIRECTORY = (Resolve-Path 'staging/bin').Path
+          $env:MPV_RUNTIME_LIBRARY = $mpvLibrary.FullName
+          python -c 'import ctypes, os; os.add_dll_directory(os.environ["MPV_RUNTIME_DIRECTORY"]); ctypes.WinDLL(os.environ["MPV_RUNTIME_LIBRARY"]); print("libmpv load OK")'
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime validation failed: libmpv cannot load with its packaged dependencies' }
           } finally {
             $env:PATH = $savedPath
           }

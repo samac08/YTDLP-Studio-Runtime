@@ -4,7 +4,7 @@
 
 ## 内容
 
-每个 Release 由 GitHub Actions 在对应原生系统构建，按平台提供 FFmpeg、FFprobe、aria2c、yt-dlp，及在可安全封装时提供的可选 libmpv 播放运行库。组件用于应用的环境检测、自动修复和离线迁移。
+每个 Release 由 GitHub Actions 在对应原生系统构建，按平台提供 FFmpeg、FFprobe、aria2c、yt-dlp。Windows 组件包同时包含已验证可加载的 libmpv 及其必需 DLL 依赖；组件用于应用的环境检测、自动修复和离线迁移。
 
 ## 覆盖平台
 
